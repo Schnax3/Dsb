@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vertretungsplan</title>
+<style>
+  :root {
+    --bg: #f5f6f8;
+    --card: #ffffff;
+    --text: #1b1f24;
+    --muted: #6b7280;
+    --border: #e3e6ea;
+    --accent: #2563eb;
+    --warn: #d97706;
+    --bad: #dc2626;
+    --ok: #16a34a;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1216;
+      --card: #181c22;
+      --text: #e8eaed;
+      --muted: #9aa3ad;
+      --border: #2a3039;
+      --accent: #60a5fa;
+      --warn: #fbbf24;
+      --bad: #f87171;
+      --ok: #4ade80;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 16px;
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.4;
+  }
+  main { max-width: 720px; margin: 0 auto; }
+  h1 { font-size: 1.4rem; margin: 0 0 4px; }
+  .sub { color: var(--muted); font-size: .9rem; margin-bottom: 16px; }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 12px 14px;
+    margin-bottom: 10px;
+  }
+  .head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+  .lesson { font-weight: 700; font-size: 1.1rem; }
+  .class { color: var(--muted); font-size: .9rem; }
+  .badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: .8rem;
+    font-weight: 600;
+    border: 1px solid currentColor;
+    margin-top: 6px;
+  }
+  .badge.warn { color: var(--warn); }
+  .badge.bad  { color: var(--bad); }
+  .badge.ok   { color: var(--ok); }
+  .badge.info { color: var(--accent); }
+  .row { margin-top: 6px; font-size: .95rem; }
+  .row span { color: var(--muted); }
+  .text { margin-top: 6px; font-style: italic; }
+  .empty, .error {
+    text-align: center;
+    padding: 32px 12px;
+    color: var(--muted);
+  }
+  .error { color: var(--bad); }
+  .meta { color: var(--muted); font-size: .8rem; text-align: center; margin-top: 16px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Vertretungsplan</h1>
+  <div class="sub" id="sub">Lade …</div>
+  <div id="list"></div>
+  <div class="meta" id="meta"></div>
+</main>
+
+<script>
+(function () {
+  var DATA_URL = "dsb_output.json";
+  var REFRESH_MS = 10 * 60 * 1000;
+
+  var subEl = document.getElementById("sub");
+  var listEl = document.getElementById("list");
+  var metaEl = document.getElementById("meta");
+
+  function isEmpty(v) {
+    return v === undefined || v === null || String(v).trim() === "" || String(v).trim() === "---";
+  }
+
+  function el(tag, className, text) {
+    var e = document.createElement(tag);
+    if (className) e.className = className;
+    if (text !== undefined) e.textContent = text;
+    return e;
+  }
+
+  function row(label, value) {
+    if (isEmpty(value)) return null;
+    var r = el("div", "row");
+    r.appendChild(el("span", null, label + ": "));
+    r.appendChild(document.createTextNode(value));
+    return r;
+  }
+
+  function badgeClass(type) {
+    var t = String(type || "").toLowerCase();
+    if (t.indexOf("entfall") !== -1 || t.indexOf("ausfall") !== -1) return "bad";
+    if (t.indexOf("vertretung") !== -1) return "warn";
+    if (t.indexOf("raum") !== -1) return "info";
+    if (t.indexOf("eva") !== -1 || t.indexOf("freisetzung") !== -1) return "ok";
+    return "info";
+  }
+
+  function formatDate(iso) {
+    if (!iso) return "";
+    var p = iso.split("-");
+    if (p.length !== 3) return iso;
+    var d = new Date(Number(p[0]), Number(p[1]) - 1, Number(p[2]));
+    return d.toLocaleDateString("de-DE", {
+      weekday: "long", day: "2-digit", month: "2-digit", year: "numeric"
+    });
+  }
+
+  function formatDateTime(iso) {
+    if (!iso) return "";
+    var d = new Date(iso);
+    if (isNaN(d.getTime())) return iso;
+    return d.toLocaleString("de-DE", { dateStyle: "medium", timeStyle: "short" });
+  }
+
+  function render(data) {
+    var groups = Array.isArray(data.entries) ? data.entries : [];
+    var entries = [];
+    groups.forEach(function (g) {
+      (Array.isArray(g) ? g : [g]).forEach(function (e) { entries.push(e); });
+    });
+
+    var cls = data.filters && data.filters.class;
+    subEl.textContent = formatDate(data.target_date) + (cls ? " · Klasse " + cls : "");
+
+    listEl.textContent = "";
+
+    if (entries.length === 0) {
+      listEl.appendChild(el("div", "empty", "Keine Einträge für diesen Tag 🎉"));
+    }
+
+    entries.forEach(function (e) {
+      var card = el("div", "card");
+
+      var head = el("div", "head");
+      head.appendChild(el("div", "lesson", isEmpty(e.lesson) ? "–" : e.lesson + ". Std."));
+      head.appendChild(el("div", "class", isEmpty(e["class"]) ? "" : e["class"]));
+      card.appendChild(head);
+
+      if (!isEmpty(e.type)) {
+        card.appendChild(el("span", "badge " + badgeClass(e.type), e.type));
+      }
+
+      [row("Lehrer", e.teacher), row("Vertretung", e.new_teacher), row("Raum", e.room)]
+        .forEach(function (r) { if (r) card.appendChild(r); });
+
+      if (!isEmpty(e.text)) card.appendChild(el("div", "text", e.text));
+
+      listEl.appendChild(card);
+    });
+
+    var updated = entries.map(function (e) { return e.updated; }).filter(function (u) { return !isEmpty(u); })[0];
+    var parts = [];
+    if (updated) parts.push("Stand Plan: " + updated);
+    if (data.current_time) parts.push("Abgerufen: " + formatDateTime(data.current_time));
+    metaEl.textContent = parts.join(" · ");
+  }
+
+  function load() {
+    fetch(DATA_URL + "?t=" + Date.now(), { cache: "no-store" })
+      .then(function (r) {
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        return r.json();
+      })
+      .then(render)
+      .catch(function (err) {
+        subEl.textContent = "";
+        listEl.textContent = "";
+        listEl.appendChild(el("div", "error", "Daten konnten nicht geladen werden (" + err.message + ")."));
+      });
+  }
+
+  load();
+  setInterval(load, REFRESH_MS);
+})();
+</script>
+</body>
+</html>
