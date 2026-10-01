@@ -12,6 +12,7 @@
     --muted: #6b7280;
     --border: #e3e6ea;
     --accent: #2563eb;
+    --accent-text: #ffffff;
     --warn: #d97706;
     --bad: #dc2626;
     --ok: #16a34a;
@@ -24,6 +25,7 @@
       --muted: #9aa3ad;
       --border: #2a3039;
       --accent: #60a5fa;
+      --accent-text: #0f1216;
       --warn: #fbbf24;
       --bad: #f87171;
       --ok: #4ade80;
@@ -40,7 +42,28 @@
   }
   main { max-width: 720px; margin: 0 auto; }
   h1 { font-size: 1.4rem; margin: 0 0 4px; }
-  .sub { color: var(--muted); font-size: .9rem; margin-bottom: 16px; }
+  .sub { color: var(--muted); font-size: .9rem; margin-bottom: 12px; }
+
+  .filter { margin-bottom: 14px; }
+  .filter-title { font-size: .8rem; color: var(--muted); margin-bottom: 6px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip {
+    font: inherit;
+    font-size: .85rem;
+    padding: 5px 12px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--card);
+    color: var(--text);
+    cursor: pointer;
+  }
+  .chip[aria-pressed="true"] {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--accent-text);
+    font-weight: 600;
+  }
+
   .card {
     background: var(--card);
     border: 1px solid var(--border);
@@ -80,6 +103,12 @@
 <main>
   <h1>Vertretungsplan</h1>
   <div class="sub" id="sub">Lade …</div>
+
+  <div class="filter" id="filter" hidden>
+    <div class="filter-title">Klassen (keine Auswahl = alle anzeigen)</div>
+    <div class="chips" id="chips"></div>
+  </div>
+
   <div id="list"></div>
   <div class="meta" id="meta"></div>
 </main>
@@ -88,10 +117,30 @@
 (function () {
   var DATA_URL = "dsb_output.json";
   var REFRESH_MS = 10 * 60 * 1000;
+  var STORAGE_KEY = "vertretungsplan.klassen";
 
   var subEl = document.getElementById("sub");
   var listEl = document.getElementById("list");
   var metaEl = document.getElementById("meta");
+  var filterEl = document.getElementById("filter");
+  var chipsEl = document.getElementById("chips");
+
+  var currentData = null;
+  var selected = loadSelection();
+
+  function loadSelection() {
+    try {
+      var raw = localStorage.getItem(STORAGE_KEY);
+      var arr = raw ? JSON.parse(raw) : [];
+      return Array.isArray(arr) ? arr : [];
+    } catch (e) {
+      return [];
+    }
+  }
+
+  function saveSelection() {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(selected)); } catch (e) {}
+  }
 
   function isEmpty(v) {
     return v === undefined || v === null || String(v).trim() === "" || String(v).trim() === "---";
@@ -138,28 +187,81 @@
     return d.toLocaleString("de-DE", { dateStyle: "medium", timeStyle: "short" });
   }
 
-  function render(data) {
+  function flatten(data) {
     var groups = Array.isArray(data.entries) ? data.entries : [];
-    var entries = [];
+    var out = [];
     groups.forEach(function (g) {
-      (Array.isArray(g) ? g : [g]).forEach(function (e) { entries.push(e); });
+      (Array.isArray(g) ? g : [g]).forEach(function (e) { out.push(e); });
     });
+    return out;
+  }
 
-    var cls = data.filters && data.filters.class;
-    subEl.textContent = formatDate(data.target_date) + (cls ? " · Klasse " + cls : "");
+  function classOf(e) {
+    return isEmpty(e["class"]) ? "" : String(e["class"]).trim();
+  }
 
+  function allClasses(entries) {
+    var seen = {};
+    entries.forEach(function (e) {
+      var c = classOf(e);
+      if (c) seen[c] = true;
+    });
+    return Object.keys(seen).sort(function (a, b) {
+      return a.localeCompare(b, "de", { numeric: true });
+    });
+  }
+
+  function renderChips(classes) {
+    chipsEl.textContent = "";
+    // gespeicherte Auswahl bereinigen: nur Klassen behalten, die es noch gibt
+    selected = selected.filter(function (c) { return classes.indexOf(c) !== -1; });
+
+    filterEl.hidden = classes.length === 0;
+
+    var all = el("button", "chip", "Alle");
+    all.type = "button";
+    all.setAttribute("aria-pressed", selected.length === 0 ? "true" : "false");
+    all.addEventListener("click", function () {
+      selected = [];
+      saveSelection();
+      rerender();
+    });
+    chipsEl.appendChild(all);
+
+    classes.forEach(function (c) {
+      var b = el("button", "chip", c);
+      b.type = "button";
+      b.setAttribute("aria-pressed", selected.indexOf(c) !== -1 ? "true" : "false");
+      b.addEventListener("click", function () {
+        var i = selected.indexOf(c);
+        if (i === -1) selected.push(c); else selected.splice(i, 1);
+        saveSelection();
+        rerender();
+      });
+      chipsEl.appendChild(b);
+    });
+  }
+
+  function renderList(entries, data) {
     listEl.textContent = "";
 
-    if (entries.length === 0) {
+    var shown = selected.length === 0
+      ? entries
+      : entries.filter(function (e) { return selected.indexOf(classOf(e)) !== -1; });
+
+    subEl.textContent = formatDate(data.target_date) +
+      (selected.length ? " · " + selected.join(", ") : "");
+
+    if (shown.length === 0) {
       listEl.appendChild(el("div", "empty", "Keine Einträge für diesen Tag 🎉"));
     }
 
-    entries.forEach(function (e) {
+    shown.forEach(function (e) {
       var card = el("div", "card");
 
       var head = el("div", "head");
       head.appendChild(el("div", "lesson", isEmpty(e.lesson) ? "–" : e.lesson + ". Std."));
-      head.appendChild(el("div", "class", isEmpty(e["class"]) ? "" : e["class"]));
+      head.appendChild(el("div", "class", classOf(e)));
       card.appendChild(head);
 
       if (!isEmpty(e.type)) {
@@ -174,11 +276,19 @@
       listEl.appendChild(card);
     });
 
-    var updated = entries.map(function (e) { return e.updated; }).filter(function (u) { return !isEmpty(u); })[0];
+    var updated = entries.map(function (e) { return e.updated; })
+      .filter(function (u) { return !isEmpty(u); })[0];
     var parts = [];
     if (updated) parts.push("Stand Plan: " + updated);
     if (data.current_time) parts.push("Abgerufen: " + formatDateTime(data.current_time));
     metaEl.textContent = parts.join(" · ");
+  }
+
+  function rerender() {
+    if (!currentData) return;
+    var entries = flatten(currentData);
+    renderChips(allClasses(entries));
+    renderList(entries, currentData);
   }
 
   function load() {
@@ -187,9 +297,13 @@
         if (!r.ok) throw new Error("HTTP " + r.status);
         return r.json();
       })
-      .then(render)
+      .then(function (data) {
+        currentData = data;
+        rerender();
+      })
       .catch(function (err) {
         subEl.textContent = "";
+        filterEl.hidden = true;
         listEl.textContent = "";
         listEl.appendChild(el("div", "error", "Daten konnten nicht geladen werden (" + err.message + ")."));
       });
