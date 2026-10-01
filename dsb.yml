@@ -1,0 +1,45 @@
+name: DSB Vertretungsplan
+
+on:
+  schedule:
+    - cron: "7 * * * *"   # jede Stunde, Minute 7 (UTC)
+  workflow_dispatch:       # manuell startbar
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: Skript ausführen
+        env:
+          DSB_USERNAME: ${{ secrets.DSB_USERNAME }}
+          DSB_PASSWORD: ${{ secrets.DSB_PASSWORD }}
+        run: |
+          python run.py --class "${{ vars.DSB_CLASS }}" --output site/dsb_output.json --no-print
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - id: deployment
+        uses: actions/deploy-pages@v4
