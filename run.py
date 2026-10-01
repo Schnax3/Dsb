@@ -1,4 +1,4 @@
-﻿import argparse
+import argparse
 import base64
 import gzip
 import json
@@ -78,6 +78,16 @@ def build_parser():
         help="Keep showing the same next school day until this hour on that day, default: 8",
     )
     parser.add_argument("--date", help="Optional explicit target date in YYYY-MM-DD format.")
+    parser.add_argument(
+        "--output",
+        default=os.getenv("DSB_OUTPUT", "/config/dsb_output.json"),
+        help="Path of the JSON output file, default: /config/dsb_output.json",
+    )
+    parser.add_argument(
+        "--no-print",
+        action="store_true",
+        help="Do not print the JSON to stdout (use this in public CI logs).",
+    )
     return parser
 
 
@@ -343,11 +353,14 @@ def main():
     }
 
     # PRINT für Home Assistant
-    print(json.dumps(output, ensure_ascii=False))
+    if not args.no_print:
+        print(json.dumps(output, ensure_ascii=False))
 
     # SAVE FILE
-    output_path = "/config/dsb_output.json"
-    with open(output_path, "w", encoding="utf-8") as f:
+    out_dir = os.path.dirname(args.output)
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
+    with open(args.output, "w", encoding="utf-8") as f:
         json.dump(output, f, ensure_ascii=False)
 
 
